@@ -1,0 +1,12 @@
+video-dub-hub/
+├── backend/
+│   ├── server.js
+│   ├── package.json
+│   └── uploads/
+├── frontend/
+│   ├── public/
+│   │   └── index.html
+│   ├── src/
+│   │   └── App.js
+│   └── package.json
+└── README.md

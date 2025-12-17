@@ -1,0 +1,887 @@
+// 📦 VIDEO DUB HUB - Complete Full-Stack App
+// Run: node combined-app.js
+// Then open: http://localhost:3000
+
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+
+// ================ BACKEND SETUP ================
+const backendApp = express();
+const backendPort = 5000;
+
+// Create uploads directory
+const uploadDir = 'uploads/videos';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Middleware
+backendApp.use(cors());
+backendApp.use(express.json());
+backendApp.use('/uploads', express.static(uploadDir));
+
+// In-memory storage for videos
+let videos = [];
+
+// Configure multer for video uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueId = uuidv4();
+    const extension = path.extname(file.originalname);
+    cb(null, `${uniqueId}${extension}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.mp4', '.avi', '.mov', '.mkv', '.webm'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    allowedTypes.includes(ext) ? cb(null, true) : cb(new Error('Only video files allowed'));
+  }
+});
+
+// ================ BACKEND ROUTES ================
+
+// Home route
+backendApp.get('/', (req, res) => {
+  res.json({ 
+    message: 'Video Dub Hub API',
+    endpoints: ['POST /api/upload', 'GET /api/videos', 'POST /api/dub/:id', 'GET /api/progress/:id']
+  });
+});
+
+// Upload video
+backendApp.post('/api/upload', upload.single('video'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const video = {
+      id: uuidv4(),
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      title: req.body.title || req.file.originalname,
+      size: req.file.size,
+      uploadDate: new Date().toISOString(),
+      status: 'uploaded',
+      hindiDubbed: false,
+      progress: 0
+    };
+
+    videos.push(video);
+    
+    res.json({
+      success: true,
+      message: '✅ Video uploaded successfully',
+      video: { id: video.id, title: video.title }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all videos
+backendApp.get('/api/videos', (req, res) => {
+  res.json(videos);
+});
+
+// Request Hindi dubbing
+backendApp.post('/api/dub/:id', (req, res) => {
+  try {
+    const video = videos.find(v => v.id === req.params.id);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+
+    video.status = 'processing';
+    video.progress = 0;
+    
+    // Simulate dubbing process
+    const simulateDubbing = () => {
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 10;
+        video.progress = progress;
+        
+        if (progress >= 100) {
+          clearInterval(interval);
+          video.status = 'completed';
+          video.hindiDubbed = true;
+          video.hindiFilename = `hindi-dub-${video.filename}`;
+        }
+      }, 1000);
+    };
+
+    simulateDubbing();
+    
+    res.json({
+      success: true,
+      message: '🎯 Dubbing process started!',
+      videoId: video.id,
+      estimatedTime: '10 seconds'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get dubbing progress
+backendApp.get('/api/progress/:id', (req, res) => {
+  const video = videos.find(v => v.id === req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  
+  res.json({
+    status: video.status,
+    progress: video.progress,
+    hindiDubbed: video.hindiDubbed
+  });
+});
+
+// Delete video
+backendApp.delete('/api/video/:id', (req, res) => {
+  try {
+    const index = videos.findIndex(v => v.id === req.params.id);
+    if (index === -1) return res.status(404).json({ error: 'Video not found' });
+    
+    const video = videos[index];
+    const filePath = path.join(uploadDir, video.filename);
+    
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    
+    videos.splice(index, 1);
+    
+    res.json({ success: true, message: '🗑️ Video deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================ FRONTEND SERVER ================
+const frontendApp = express();
+const frontendPort = 3000;
+
+// Serve HTML frontend
+const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Dub Hub | Hindi Dubbing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .app {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            color: white;
+            opacity: 0.9;
+        }
+
+        .upload-section, .videos-section {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .upload-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        #titleInput {
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            width: 100%;
+        }
+
+        .dropzone {
+            border: 3px dashed #667eea;
+            border-radius: 10px;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            background: #f8f9ff;
+            transition: all 0.3s;
+        }
+
+        .dropzone:hover {
+            background: #e6eeff;
+        }
+
+        .dropzone.dragover {
+            background: #e6eeff;
+            border-color: #4ecdc4;
+        }
+
+        .progress-bar {
+            height: 10px;
+            background: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .video-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 1.5rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .video-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .video-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .video-header h3 {
+            font-size: 1.2rem;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-uploaded { background: #e6f7ff; color: #1890ff; }
+        .status-processing { background: #fff7e6; color: #fa8c16; }
+        .status-completed { background: #f6ffed; color: #52c41a; }
+
+        .video-info {
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .video-info p {
+            margin-bottom: 0.5rem;
+        }
+
+        .hindi-badge {
+            color: #52c41a;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .video-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn-primary { background: #1890ff; color: white; }
+        .btn-primary:hover { background: #096dd9; }
+
+        .btn-secondary { background: #722ed1; color: white; }
+        .btn-secondary:hover { background: #531dab; }
+
+        .btn-success { background: #52c41a; color: white; }
+        .btn-success:hover { background: #389e0d; }
+
+        .btn-danger { background: #ff4d4f; color: white; }
+        .btn-danger:hover { background: #d9363e; }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: white;
+            opacity: 0.8;
+            margin-top: 2rem;
+        }
+
+        .spinner {
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .app { padding: 10px; }
+            .header h1 { font-size: 2rem; }
+            .video-grid { grid-template-columns: 1fr; }
+            .video-actions { flex-direction: column; }
+            .btn { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="header">
+            <h1>🎬 Video Dub Hub</h1>
+            <p>Upload long videos and get automatic Hindi dubbing</p>
+        </div>
+
+        <div class="upload-section">
+            <h2>📤 Upload Your Video</h2>
+            <div class="upload-container">
+                <input type="text" id="titleInput" placeholder="Video title (optional)">
+                
+                <div class="dropzone" id="dropzone">
+                    <p style="font-size: 48px;">📁</p>
+                    <p>Drag & drop a video file here, or click to select</p>
+                    <p style="color: #888; font-size: 0.9rem; margin-top: 10px;">
+                        Supports: MP4, AVI, MOV, MKV, WEBM (Max 2GB)
+                    </p>
+                    <input type="file" id="fileInput" style="display: none;" accept="video/*">
+                </div>
+
+                <div id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="progressText">Uploading: 0%</p>
+                </div>
+
+                <button class="btn btn-primary" id="uploadBtn" style="align-self: flex-start;">
+                    Start Upload
+                </button>
+            </div>
+        </div>
+
+        <div class="videos-section">
+            <h2>🎥 Your Videos (<span id="videoCount">0</span>)</h2>
+            <div id="videoList">
+                <div style="text-align: center; padding: 3rem; color: #888;">
+                    <p style="font-size: 48px; margin-bottom: 1rem;">📼</p>
+                    <p>No videos uploaded yet</p>
+                    <p>Upload your first video to get started!</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <h3>🎥 Large Video Support</h3>
+                <p>Upload videos up to 2GB in multiple formats</p>
+            </div>
+            <div class="feature-card">
+                <h3>🇮🇳 Hindi Dubbing</h3>
+                <p>Automatic translation and voice dubbing</p>
+            </div>
+            <div class="feature-card">
+                <h3>⚡ Fast Processing</h3>
+                <p>Quick video processing pipeline</p>
+            </div>
+            <div class="feature-card">
+                <h3>🔒 Secure Storage</h3>
+                <p>Your videos are stored securely</p>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>© 2024 Video Dub Hub | Made with ❤️ for Hindi dubbing</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000';
+        let videos = [];
+        let pollingInterval = null;
+
+        // DOM Elements
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const titleInput = document.getElementById('titleInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadProgress = document.getElementById('uploadProgress');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const videoList = document.getElementById('videoList');
+        const videoCount = document.getElementById('videoCount');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchVideos();
+            setupEventListeners();
+        });
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // File drop zone
+            dropzone.addEventListener('click', () => fileInput.click());
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileSelect(e.target.files[0]);
+                }
+            });
+
+            // Drag and drop
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, unhighlight, false);
+            });
+
+            function highlight() {
+                dropzone.classList.add('dragover');
+            }
+
+            function unhighlight() {
+                dropzone.classList.remove('dragover');
+            }
+
+            dropzone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    handleFileSelect(files[0]);
+                }
+            });
+
+            // Upload button
+            uploadBtn.addEventListener('click', handleUpload);
+        }
+
+        // Handle file selection
+        function handleFileSelect(file) {
+            const allowedTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-matroska', 'video/webm'];
+            const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
+
+            if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp4|avi|mov|mkv|webm)$/i)) {
+                alert('❌ Only video files are allowed (MP4, AVI, MOV, MKV, WEBM)');
+                return;
+            }
+
+            if (file.size > maxSize) {
+                alert('❌ File size exceeds 2GB limit');
+                return;
+            }
+
+            // Set default title if not provided
+            if (!titleInput.value.trim()) {
+                titleInput.value = file.name.replace(/\.[^/.]+$/, "");
+            }
+
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = `Upload "${file.name}"`;
+            
+            // Store file reference
+            uploadBtn.file = file;
+        }
+
+        // Handle upload
+        async function handleUpload() {
+            const file = uploadBtn.file;
+            if (!file) {
+                alert('Please select a video file first');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', file);
+            formData.append('title', titleInput.value.trim() || file.name);
+
+            // Show progress
+            uploadProgress.style.display = 'block';
+            uploadBtn.disabled = true;
+
+            try {
+                const xhr = new XMLHttpRequest();
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        progressFill.style.width = percent + '%';
+                        progressText.textContent = \`Uploading: \${percent}%\`;
+                    }
+                });
+
+                xhr.addEventListener('load', async () => {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            alert('✅ Video uploaded successfully!');
+                            
+                            // Reset form
+                            titleInput.value = '';
+                            uploadBtn.textContent = 'Start Upload';
+                            uploadBtn.disabled = false;
+                            uploadBtn.file = null;
+                            uploadProgress.style.display = 'none';
+                            progressFill.style.width = '0%';
+                            
+                            // Refresh video list
+                            await fetchVideos();
+                        } else {
+                            throw new Error(response.error || 'Upload failed');
+                        }
+                    } else {
+                        throw new Error(\`Upload failed: \${xhr.status}\`);
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    alert('❌ Upload failed. Please check your connection.');
+                    uploadBtn.disabled = false;
+                    uploadProgress.style.display = 'none';
+                });
+
+                xhr.open('POST', \`\${API_BASE}/api/upload\`);
+                xhr.send(formData);
+
+            } catch (error) {
+                alert(\`❌ Error: \${error.message}\`);
+                uploadBtn.disabled = false;
+                uploadProgress.style.display = 'none';
+            }
+        }
+
+        // Fetch videos from server
+        async function fetchVideos() {
+            try {
+                const response = await fetch(\`\${API_BASE}/api/videos\`);
+                videos = await response.json();
+                renderVideos();
+                startPollingProgress();
+            } catch (error) {
+                console.error('Error fetching videos:', error);
+            }
+        }
+
+        // Render videos list
+        function renderVideos() {
+            videoCount.textContent = videos.length;
+            
+            if (videos.length === 0) {
+                videoList.innerHTML = \`
+                    <div style="text-align: center; padding: 3rem; color: #888;">
+                        <p style="font-size: 48px; margin-bottom: 1rem;">📼</p>
+                        <p>No videos uploaded yet</p>
+                        <p>Upload your first video to get started!</p>
+                    </div>
+                \`;
+                return;
+            }
+
+            videoList.innerHTML = \`
+                <div class="video-grid">
+                    \${videos.map(video => \`
+                        <div class="video-card" data-id="\${video.id}">
+                            <div class="video-header">
+                                <h3>\${escapeHtml(video.title)}</h3>
+                                <span class="status-badge status-\${video.status}">
+                                    \${video.status}
+                                </span>
+                            </div>
+                            
+                            <div class="video-info">
+                                <p><strong>File:</strong> \${escapeHtml(video.originalName)}</p>
+                                <p><strong>Size:</strong> \${formatFileSize(video.size)}</p>
+                                <p><strong>Uploaded:</strong> \${formatDate(video.uploadDate)}</p>
+                                
+                                \${video.status === 'processing' ? \`
+                                    <div style="color: #fa8c16; margin-top: 0.5rem;">
+                                        <span class="spinner">⏳</span> 
+                                        Dubbing in progress: \${video.progress}%
+                                    </div>
+                                \` : ''}
+                                
+                                \${video.hindiDubbed ? \`
+                                    <p class="hindi-badge">✅ Hindi Dubbing Available</p>
+                                \` : ''}
+                            </div>
+                            
+                            <div class="video-actions">
+                                <button class="btn btn-primary" onclick="playVideo('\${video.filename}')">
+                                    ▶ Play Original
+                                </button>
+                                
+                                \${video.status === 'uploaded' ? \`
+                                    <button class="btn btn-secondary" onclick="requestDubbing('\${video.id}')">
+                                        🎯 Dub to Hindi
+                                    </button>
+                                \` : ''}
+                                
+                                \${video.hindiDubbed ? \`
+                                    <button class="btn btn-success" onclick="playHindiVideo('\${video.filename}')">
+                                        🔊 Play Hindi Version
+                                    </button>
+                                \` : ''}
+                                
+                                <button class="btn btn-danger" onclick="deleteVideo('\${video.id}')">
+                                    🗑 Delete
+                                </button>
+                            </div>
+                        </div>
+                    \`).join('')}
+                </div>
+            \`;
+        }
+
+        // Play original video
+        function playVideo(filename) {
+            window.open(\`\${API_BASE}/uploads/videos/\${filename}\`, '_blank');
+        }
+
+        // Play Hindi dubbed video
+        function playHindiVideo(filename) {
+            // For demo, we'll play the original video
+            // In real app, this would be the dubbed version
+            window.open(\`\${API_BASE}/uploads/videos/\${filename}\`, '_blank');
+        }
+
+        // Request Hindi dubbing
+        async function requestDubbing(videoId) {
+            try {
+                const response = await fetch(\`\${API_BASE}/api/dub/\${videoId}\`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('🎯 Dubbing process started! This will take about 10 seconds.');
+                    await fetchVideos();
+                } else {
+                    alert(\`❌ \${result.error}\`);
+                }
+            } catch (error) {
+                alert('❌ Failed to start dubbing process');
+            }
+        }
+
+        // Delete video
+        async function deleteVideo(videoId) {
+            if (!confirm('Are you sure you want to delete this video?')) return;
+            
+            try {
+                const response = await fetch(\`\${API_BASE}/api/video/\${videoId}\`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Video deleted successfully');
+                    await fetchVideos();
+                } else {
+                    alert(\`❌ \${result.error}\`);
+                }
+            } catch (error) {
+                alert('❌ Failed to delete video');
+            }
+        }
+
+        // Start polling for progress updates
+        function startPollingProgress() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            pollingInterval = setInterval(async () => {
+                const processingVideos = videos.filter(v => v.status === 'processing');
+                
+                if (processingVideos.length === 0) {
+                    clearInterval(pollingInterval);
+                    return;
+                }
+                
+                for (const video of processingVideos) {
+                    try {
+                        const response = await fetch(\`\${API_BASE}/api/progress/\${video.id}\`);
+                        const progress = await response.json();
+                        
+                        // Update video progress
+                        const videoIndex = videos.findIndex(v => v.id === video.id);
+                        if (videoIndex !== -1) {
+                            videos[videoIndex].progress = progress.progress;
+                            videos[videoIndex].status = progress.status;
+                            videos[videoIndex].hindiDubbed = progress.hindiDubbed;
+                        }
+                    } catch (error) {
+                        console.error('Error checking progress:', error);
+                    }
+                }
+                
+                renderVideos();
+            }, 1000);
+        }
+
+        // Utility functions
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Make functions available globally
+        window.playVideo = playVideo;
+        window.playHindiVideo = playHindiVideo;
+        window.requestDubbing = requestDubbing;
+        window.deleteVideo = deleteVideo;
+    </script>
+</body>
+</html>
+`;
+
+// Serve the frontend
+frontendApp.get('/', (req, res) => {
+  res.send(html);
+});
+
+// ================ START SERVERS ================
+// Start backend server
+backendApp.listen(backendPort, () => {
+  console.log('🚀 Backend server running at http://localhost:' + backendPort);
+  console.log('📁 Upload directory: ' + path.resolve(uploadDir));
+});
+
+// Start frontend server
+frontendApp.listen(frontendPort, () => {
+  console.log('🎨 Frontend running at http://localhost:' + frontendPort);
+  console.log('\n✅ Application ready!');
+  console.log('\n📋 How to use:');
+  console.log('1. Open http://localhost:3000 in your browser');
+  console.log('2. Drag & drop a video file (MP4, AVI, MOV, MKV, WEBM)');
+  console.log('3. Click "Dub to Hindi" to start dubbing');
+  console.log('4. Watch real-time progress updates');
+  console.log('5. Play videos when dubbing completes\n');
+});

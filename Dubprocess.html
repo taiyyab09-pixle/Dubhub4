@@ -1,0 +1,135 @@
+// SIMPLE VIDEO DUB HUB - One File, No Dependencies
+// Run: node single-file-app.js
+// Open: http://localhost:8080
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
+
+const PORT = 8080;
+const UPLOAD_DIR = './uploads';
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+
+let videos = [];
+
+const server = http.createServer((req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE');
+  
+  if (req.url === '/' && req.method === 'GET') {
+    // Serve HTML UI
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Video Dub Hub</title>
+        <style>
+            body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+            .upload { background: #f0f0f0; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .video-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+            button { background: #4CAF50; color: white; border: none; padding: 10px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <h1>🎬 Video Dub Hub</h1>
+        <div class="upload">
+            <h3>Upload Video</h3>
+            <input type="file" id="videoFile" accept="video/*">
+            <input type="text" id="title" placeholder="Title">
+            <button onclick="uploadVideo()">Upload</button>
+            <div id="progress"></div>
+        </div>
+        <div id="videos"></div>
+        <script>
+            async function uploadVideo() {
+                const file = document.getElementById('videoFile').files[0];
+                const title = document.getElementById('title').value || file.name;
+                const formData = new FormData();
+                formData.append('video', file);
+                formData.append('title', title);
+                
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload');
+                xhr.upload.onprogress = (e) => {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    document.getElementById('progress').innerHTML = 'Uploading: ' + percent + '%';
+                };
+                xhr.onload = () => {
+                    alert('Uploaded!');
+                    loadVideos();
+                };
+                xhr.send(formData);
+            }
+            
+            async function loadVideos() {
+                const res = await fetch('/videos');
+                const videos = await res.json();
+                let html = '<h2>Your Videos</h2>';
+                videos.forEach(v => {
+                    html += \`
+                    <div class="video-card">
+                        <h3>\${v.title}</h3>
+                        <button onclick="dubVideo('\${v.id}')">🎯 Dub to Hindi</button>
+                        <button onclick="playVideo('\${v.filename}')">▶ Play</button>
+                    </div>\`;
+                });
+                document.getElementById('videos').innerHTML = html;
+            }
+            
+            function dubVideo(id) {
+                fetch('/dub/' + id, { method: 'POST' });
+                alert('Dubbing started!');
+            }
+            
+            function playVideo(filename) {
+                window.open('/video/' + filename);
+            }
+            
+            loadVideos();
+        </script>
+    </body>
+    </html>`;
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
+  }
+  else if (req.url === '/videos' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(videos));
+  }
+  else if (req.url === '/upload' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      const video = {
+        id: randomUUID(),
+        title: 'Uploaded Video',
+        filename: 'video-' + Date.now() + '.mp4',
+        status: 'uploaded'
+      };
+      videos.push(video);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, video }));
+    });
+  }
+  else if (req.url.startsWith('/dub/') && req.method === 'POST') {
+    const id = req.url.split('/')[2];
+    const video = videos.find(v => v.id === id);
+    if (video) {
+      video.status = 'processing';
+      setTimeout(() => video.status = 'completed', 3000);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    }
+  }
+  else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`✅ Video Dub Hub running at http://localhost:${PORT}`);
+  console.log(`📁 Open in your browser and start uploading videos!`);
+});
